@@ -1,0 +1,14 @@
+# Cache and Data
+scraper_cache/
+data/
+*.pyc
+__pycache__/
+
+# IDE/Editor specific
+.vscode/
+.idea/
+
+# Environment
+.env
+venv/
+*.env
