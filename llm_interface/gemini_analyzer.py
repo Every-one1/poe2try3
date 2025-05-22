@@ -19,10 +19,17 @@ SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
 ]
-MODEL_NAME = "gemini-1.5-flash" # Updated to a generally available model
+MODEL_NAME = "gemini-1.5-flash"
 
-def generate_search_suggestions(build_data):
+def _log_message(message, progress_callback=None):
+    if progress_callback:
+        progress_callback(message)
+    else:
+        print(message) # Fallback for direct calls or tests
+
+def generate_search_suggestions(build_data, progress_callback=None):
     """Uses Gemini to generate relevant search terms for community research."""
+    _log_message("Generating search suggestions with Gemini...", progress_callback)
     try:
         model = genai.GenerativeModel(MODEL_NAME, safety_settings=SAFETY_SETTINGS)
         
@@ -47,30 +54,31 @@ def generate_search_suggestions(build_data):
                 cleaned_response_text = response.text.replace('```json', '').replace('```', '').strip()
                 suggestions = json.loads(cleaned_response_text)
                 if isinstance(suggestions, list):
+                    _log_message(f"Generated {len(suggestions)} search suggestions.", progress_callback)
                     return suggestions
             except json.JSONDecodeError:
-                print(f"Warning: Could not parse Gemini's search suggestions. Raw text: {response.text}")
+                _log_message(f"Warning: Could not parse Gemini's search suggestions. Raw text: {response.text}", progress_callback)
         return []
     except Exception as e:
-        print(f"Error generating search suggestions: {e}")
+        _log_message(f"Error generating search suggestions: {e}", progress_callback)
         return []
 
-def gather_additional_data(build_data, search_queries):
+def gather_additional_data(build_data, search_queries, progress_callback=None):
     """Gathers additional data from various sources to enhance the analysis."""
+    _log_message("Starting to gather additional data...", progress_callback)
     additional_data = {
         "wiki_data": {},
         "community_data": {},
-        "patch_notes_data": None # Renamed for clarity
+        "patch_notes_data": None
     }
     
-    main_skill_name_from_xml = build_data.get("skills_xml", {}).get("main_skill_name", "") # Adjusted path
-    class_name_from_xml = build_data.get("basics", {}).get("className", "") # Adjusted path
+    main_skill_name_from_xml = build_data.get("skills_xml", {}).get("main_skill_name", "")
+    class_name_from_xml = build_data.get("basics", {}).get("className", "")
 
     if main_skill_name_from_xml:
-        print(f"\nFetching wiki data for main skill: {main_skill_name_from_xml}")
-        additional_data["wiki_data"]["main_skill"] = poe2_wiki_scraper.get_wiki_data(main_skill_name_from_xml, "skill")
+        _log_message(f"Fetching wiki data for main skill: {main_skill_name_from_xml}", progress_callback)
+        additional_data["wiki_data"]["main_skill"] = poe2_wiki_scraper.get_wiki_data(main_skill_name_from_xml, "skill", progress_callback=progress_callback)
     
-    # Scrape unique items from build_data["items_xml"]
     unique_items_from_xml = []
     if build_data.get("items_xml", {}).get("equipped_items"):
         for item in build_data["items_xml"]["equipped_items"]:
@@ -78,116 +86,127 @@ def gather_additional_data(build_data, search_queries):
                 unique_items_from_xml.append(item["name"])
 
     if unique_items_from_xml:
-        print(f"\nFetching wiki data for {len(unique_items_from_xml)} unique items...")
+        _log_message(f"Fetching wiki data for {len(unique_items_from_xml)} unique items...", progress_callback)
         for item_name in unique_items_from_xml:
-            print(f"Fetching data for: {item_name}")
-            additional_data["wiki_data"][f"item_{item_name.replace(' ', '_')}"] = poe2_wiki_scraper.get_wiki_data(item_name, "item")
+            _log_message(f"Fetching wiki data for item: {item_name}", progress_callback)
+            additional_data["wiki_data"][f"item_{item_name.replace(' ', '_')}"] = poe2_wiki_scraper.get_wiki_data(item_name, "item", progress_callback=progress_callback)
 
-    # Use generated search_queries for community data
     if search_queries:
-        print("\nSearching community resources using generated queries...")
+        _log_message("Searching community resources using generated queries...", progress_callback)
         all_reddit_posts = []
         all_forum_posts = []
         all_build_guides = []
 
-        for category, queries in search_queries.items():
-            if not isinstance(queries, list): # Ensure queries is a list
-                print(f"Warning: Queries for category '{category}' is not a list, skipping.")
-                continue
-            for query in queries:
-                print(f"Searching Reddit for: {query}")
-                reddit_data = poe2_community_scraper.get_reddit_posts(query)
+        # Ensure search_queries is a list of strings, not a dict
+        if isinstance(search_queries, dict): # Common mistake if generate_search_suggestions returns a dict
+            actual_queries = []
+            for q_list in search_queries.values(): # If it's a dict of lists of queries
+                if isinstance(q_list, list):
+                    actual_queries.extend(q_list)
+            search_queries = actual_queries
+        
+        if not isinstance(search_queries, list):
+             _log_message(f"Warning: search_queries is not a list, skipping community search. Type: {type(search_queries)}", progress_callback)
+        else:
+            for query in search_queries:
+                if not isinstance(query, str):
+                    _log_message(f"Warning: Query '{query}' is not a string, skipping.", progress_callback)
+                    continue
+                _log_message(f"Searching Reddit for: {query}", progress_callback)
+                reddit_data = poe2_community_scraper.get_reddit_posts(query, progress_callback=progress_callback)
                 if reddit_data and reddit_data.get("posts"):
                     all_reddit_posts.extend(reddit_data["posts"])
                 
-                print(f"Searching official forums for: {query}")
-                forum_data = poe2_community_scraper.get_forum_posts(query)
+                _log_message(f"Searching official forums for: {query}", progress_callback)
+                forum_data = poe2_community_scraper.get_forum_posts(query, progress_callback=progress_callback)
                 if forum_data and forum_data.get("posts"):
                     all_forum_posts.extend(forum_data["posts"])
                 
-                print(f"Searching build guides for: {query} (Class: {class_name_from_xml})")
-                guides_data = poe2_community_scraper.get_build_guides(query, class_name_from_xml)
+                _log_message(f"Searching build guides for: {query} (Class: {class_name_from_xml})", progress_callback)
+                guides_data = poe2_community_scraper.get_build_guides(query, class_name_from_xml, progress_callback=progress_callback)
                 if guides_data and guides_data.get("guides"):
                     all_build_guides.extend(guides_data["guides"])
         
         if all_reddit_posts:
-            additional_data["community_data"]["reddit"] = {"posts": all_reddit_posts[:10]} # Limit posts
+            additional_data["community_data"]["reddit"] = {"posts": all_reddit_posts[:10]}
         if all_forum_posts:
-            additional_data["community_data"]["forum"] = {"posts": all_forum_posts[:10]} # Limit posts
+            additional_data["community_data"]["forum"] = {"posts": all_forum_posts[:10]}
         if all_build_guides:
-            additional_data["community_data"]["guides"] = {"guides": all_build_guides[:5]} # Limit guides
+            additional_data["community_data"]["guides"] = {"guides": all_build_guides[:5]}
     
-    print("\nFetching latest patch notes from forum...")
-    # Uses the new patch_notes_scraper
-    additional_data["patch_notes_data"] = patch_notes_scraper.get_patch_notes() 
+    _log_message("Fetching latest patch notes from forum...", progress_callback)
+    additional_data["patch_notes_data"] = patch_notes_scraper.get_patch_notes(progress_callback=progress_callback) 
     
+    _log_message("Finished gathering additional data.", progress_callback)
     return additional_data
 
-def format_additional_data(additional_data):
+def format_additional_data(additional_data, progress_callback=None):
     """Formats the additional data into a string for the prompt."""
+    _log_message("Formatting additional data for LLM prompt...", progress_callback)
     formatted = []
     
     if additional_data.get("wiki_data"):
         formatted.append("\n=== WIKI DATA ===")
         for key, data in additional_data["wiki_data"].items():
-            if data and data.get("name"): # Check if data is not None and has a name
+            if data and data.get("name"):
                 formatted.append(f"\n--- {data['name']} ({data.get('type', 'N/A')}) ---")
                 if data.get("description"): formatted.append(f"Description: {data['description']}")
-                if data.get("mechanics"): formatted.append(f"Mechanics: {data['mechanics']}") # Assuming mechanics is now a string
+                if data.get("mechanics"): formatted.append(f"Mechanics: {data['mechanics']}")
                 if data.get("lore"): formatted.append(f"Lore: {data['lore']}")
                 if data.get("version_history"):
                     formatted.append("Version History (from Wiki):")
-                    for entry in data["version_history"][:3]: formatted.append(f"- {entry}") # Limit entries
+                    for entry in data["version_history"][:3]: formatted.append(f"- {entry}")
     
     if additional_data.get("community_data"):
         formatted.append("\n\n=== COMMUNITY INSIGHTS (Highlights) ===")
         if additional_data["community_data"].get("reddit", {}).get("posts"):
             formatted.append("\n--- Relevant Reddit Posts (Sample) ---")
-            for post in additional_data["community_data"]["reddit"]["posts"][:2]: # Limit sample
+            for post in additional_data["community_data"]["reddit"]["posts"][:2]:
                 formatted.append(f"\nTitle: {post.get('title', 'N/A')}")
                 formatted.append(f"Snippet: {post.get('selftext', '')[:250]}...")
         if additional_data["community_data"].get("guides", {}).get("guides"):
             formatted.append("\n--- Relevant Build Guides (Sample) ---")
-            for guide in additional_data["community_data"]["guides"]["guides"][:1]: # Limit sample
+            for guide in additional_data["community_data"]["guides"]["guides"][:1]:
                 formatted.append(f"\nTitle: {guide.get('title', 'N/A')} (Source: {guide.get('source', 'N/A')})")
 
     if additional_data.get("patch_notes_data"):
         patch_info = additional_data["patch_notes_data"]
-        if patch_info.get("latest_patch"):
+        if patch_info and patch_info.get("latest_patch"): 
             latest = patch_info["latest_patch"]
-            formatted.append("\n\n=== LATEST PATCH NOTES (Forum) ===")
-            formatted.append(f"\nTitle: {latest.get('title', 'N/A')} (Date: {latest.get('date', 'N/A')})")
-            formatted.append(f"Summary: {str(latest.get('text_content', ''))[:500]}...") # Snippet of content
+            if latest: 
+                formatted.append("\n\n=== LATEST PATCH NOTES (Forum) ===")
+                formatted.append(f"\nTitle: {latest.get('title', 'N/A')} (Date: {latest.get('date', 'N/A')})")
+                formatted.append(f"Summary: {str(latest.get('text_content', ''))[:500]}...")
     
+    _log_message("Finished formatting additional data.", progress_callback)
     return "\n".join(formatted)
 
-def analyze_build_with_gemini(build_data_json_string, user_goals_and_context=""):
+def analyze_build_with_gemini(build_data_json_string, user_goals_and_context="", progress_callback=None):
     """Sends the build data (XML + Scraped) to Gemini and returns its analysis."""
+    _log_message("Starting build analysis with Gemini...", progress_callback)
     if not API_KEY or API_KEY == "YOUR_API_KEY_PLACEHOLDER_TEXT":
+        _log_message("Error: Gemini API Key not configured for analyze_build_with_gemini.", progress_callback)
         return "Error: Gemini API Key not configured."
     try:
         model = genai.GenerativeModel(MODEL_NAME, safety_settings=SAFETY_SETTINGS)
         
-        build_data_dict = json.loads(build_data_json_string) # Expects JSON string from main.py
+        build_data_dict = json.loads(build_data_json_string)
 
-        # Generate search queries based on the initial PoB XML data
-        # This requires a subset of data that `generate_search_suggestions` expects
         search_suggestion_input = {
             "main_skill_name": build_data_dict.get("skills_xml", {}).get("main_skill_name"),
             "className": build_data_dict.get("basics", {}).get("className"),
             "ascendClassName": build_data_dict.get("basics", {}).get("ascendClassName"),
             "equipped_items": build_data_dict.get("items_xml", {}).get("equipped_items", [])
         }
-        print("\nGenerating search queries for community data...")
-        search_queries = generate_search_suggestions(search_suggestion_input)
         
-        # Gather additional data (Wiki, Community, Patch Notes)
-        print("\nGathering additional data (Wiki, Community, Patch Notes)...")
-        # Pass the full build_data_dict for context to gather_additional_data
-        additional_data_dict = gather_additional_data(build_data_dict, search_queries if search_queries else {})
-        formatted_additional_data = format_additional_data(additional_data_dict)
+        _log_message("Generating search queries for community data...", progress_callback)
+        search_queries = generate_search_suggestions(search_suggestion_input, progress_callback=progress_callback)
         
-        poe2_context_clarifications = "..." # Same as before
+        _log_message("Gathering additional data (Wiki, Community, Patch Notes)...", progress_callback)
+        additional_data_dict = gather_additional_data(build_data_dict, search_queries if search_queries else {}, progress_callback=progress_callback)
+        formatted_additional_data = format_additional_data(additional_data_dict, progress_callback=progress_callback)
+        
+        poe2_context_clarifications = "..." 
 
         prompt = f"""
         You are a Path of Exile 2 build analysis expert.
@@ -205,31 +224,35 @@ def analyze_build_with_gemini(build_data_json_string, user_goals_and_context="")
         Integrate insights from the additional context provided.
         """
         
-        print(f"\nSending comprehensive data to Gemini model: {MODEL_NAME}...")
+        _log_message(f"Sending comprehensive data to Gemini model: {MODEL_NAME}...", progress_callback)
         response = model.generate_content(prompt)
         
         if response.parts:
+            _log_message("Gemini analysis successful.", progress_callback)
             return response.text
         else:
-            # Handle cases with no response parts, possibly due to safety settings
-            print(f"Warning: Gemini response might be empty or blocked. Prompt Feedback: {response.prompt_feedback}")
+            _log_message(f"Warning: Gemini response might be empty or blocked. Prompt Feedback: {response.prompt_feedback}", progress_callback)
             if response.candidates:
                 for candidate in response.candidates:
-                    print(f"Candidate Finish Reason: {candidate.finish_reason}")
+                    _log_message(f"Candidate Finish Reason: {candidate.finish_reason}", progress_callback)
                     if candidate.safety_ratings:
                         for rating in candidate.safety_ratings:
-                             print(f"Safety Rating: {rating.category} - {rating.probability}")
+                             _log_message(f"Safety Rating: {rating.category} - {rating.probability}", progress_callback)
             return "Error: No content parts returned from Gemini. The prompt might have been blocked or the response was empty. Check console for details."
 
     except Exception as e:
-        print(f"An error occurred while communicating with Gemini: {e}")
+        _log_message(f"An error occurred while communicating with Gemini: {e}", progress_callback)
         return f"Error analyzing build: {e}"
 
-def summarize_patch_note_with_llm(processed_patch_data):
+def summarize_patch_note_with_llm(processed_patch_data, progress_callback=None):
     """Generates a concise, engaging summary of a patch note using Gemini."""
+    _log_message("Attempting to summarize patch note with LLM...", progress_callback)
     if not API_KEY or API_KEY == "YOUR_API_KEY_PLACEHOLDER_TEXT":
+        _log_message("Error: Gemini API Key not configured for summarize_patch_note_with_llm.", progress_callback)
         return "Error: Gemini API Key not configured."
-    if not processed_patch_data: return "Error: No processed patch data provided."
+    if not processed_patch_data: 
+        _log_message("Error: No processed patch data provided to summarize_patch_note_with_llm.", progress_callback)
+        return "Error: No processed patch data provided."
     try:
         model = genai.GenerativeModel(MODEL_NAME, safety_settings=SAFETY_SETTINGS)
         prompt = f"""
@@ -246,14 +269,25 @@ def summarize_patch_note_with_llm(processed_patch_data):
         Provide a new, well-written summary suitable for a quick player update.
         """
         response = model.generate_content(prompt)
-        return response.text if response.parts else "Error: LLM response empty/blocked for summary."
-    except Exception as e: return f"Error summarizing patch note: {e}"
+        if response.parts:
+            _log_message("LLM summary generated successfully.", progress_callback)
+            return response.text
+        else:
+            _log_message("Error: LLM response empty/blocked for summary.", progress_callback)
+            return "Error: LLM response empty/blocked for summary."
+    except Exception as e: 
+        _log_message(f"Error summarizing patch note: {e}", progress_callback)
+        return f"Error summarizing patch note: {e}"
 
-def answer_question_on_patch_note_with_llm(processed_patch_data, question):
+def answer_question_on_patch_note_with_llm(processed_patch_data, question, progress_callback=None):
     """Answers a specific question based *solely* on the provided patch note content using Gemini."""
+    _log_message(f"Attempting to answer question on patch note: '{question[:30]}...'", progress_callback)
     if not API_KEY or API_KEY == "YOUR_API_KEY_PLACEHOLDER_TEXT":
+        _log_message("Error: Gemini API Key not configured for answer_question_on_patch_note_with_llm.", progress_callback)
         return "Error: Gemini API Key not configured."
-    if not processed_patch_data or not question: return "Error: Missing data or question."
+    if not processed_patch_data or not question: 
+        _log_message("Error: Missing data or question for answer_question_on_patch_note_with_llm.", progress_callback)
+        return "Error: Missing data or question."
     try:
         model = genai.GenerativeModel(MODEL_NAME, safety_settings=SAFETY_SETTINGS)
         prompt = f"""
@@ -271,32 +305,45 @@ def answer_question_on_patch_note_with_llm(processed_patch_data, question):
         Answer:
         """
         response = model.generate_content(prompt)
-        return response.text if response.parts else "Error: LLM response empty/blocked for Q&A."
-    except Exception as e: return f"Error answering question: {e}"
+        if response.parts:
+            _log_message("LLM answer generated successfully.", progress_callback)
+            return response.text
+        else:
+            _log_message("Error: LLM response empty/blocked for Q&A.", progress_callback)
+            return "Error: LLM response empty/blocked for Q&A."
+    except Exception as e: 
+        _log_message(f"Error answering question: {e}", progress_callback)
+        return f"Error answering question: {e}"
 
 if __name__ == "__main__":
+    def _main_logger(message):
+        print(f"[MainTestLogger] {message}")
+
     print("Gemini Analyzer - Direct Test Mode")
     if not API_KEY or API_KEY == "YOUR_API_KEY_PLACEHOLDER_TEXT":
-        print("ERROR: GEMINI_API_KEY not set. Skipping LLM tests.")
+        _main_logger("ERROR: GEMINI_API_KEY not set. Skipping LLM tests.")
     else:
-        print("\n--- Testing Build Analysis (Simplified Call) ---")
-        # This test now requires a JSON string similar to what main.py would pass
+        _main_logger("\n--- Testing Build Analysis (Simplified Call) ---")
         sample_build_overview_for_llm = {
             "basics": {"className": "Elementalist", "level": "90"},
             "skills_xml": {"main_skill_name": "Fireball"},
             "items_xml": {"equipped_items": [{"name": "The Consuming Dark", "rarity": "UNIQUE"}]}
         }
-        build_analysis_result = analyze_build_with_gemini(json.dumps(sample_build_overview_for_llm), "Focus on Fireball scaling for bossing.")
-        print("\n--- GEMINI BUILD ANALYSIS RESULT ---")
-        print(build_analysis_result)
+        build_analysis_result = analyze_build_with_gemini(
+            json.dumps(sample_build_overview_for_llm), 
+            "Focus on Fireball scaling for bossing.",
+            progress_callback=_main_logger
+        )
+        _main_logger("\n--- GEMINI BUILD ANALYSIS RESULT ---")
+        _main_logger(build_analysis_result)
 
-        print("\n\n--- Testing Patch Note LLM Functions ---")
+        _main_logger("\n\n--- Testing Patch Note LLM Functions ---")
         sample_patch_data = {
             "title": "Hotfix 3.23.1b", "date": "2023-12-15T14:30:00",
             "cleaned_text": "Fixed a bug where Tornado skill dealt no damage. Buffed Fireball damage by 10%.",
             "keywords": ["tornado", "fireball", "buff"], "summary": "Tornado fix, Fireball buff."
         }
-        summary = summarize_patch_note_with_llm(sample_patch_data)
-        print(f"\nLLM Summary:\n{summary}")
-        answer = answer_question_on_patch_note_with_llm(sample_patch_data, "What happened to Fireball?")
-        print(f"\nQ: What happened to Fireball?\nA: {answer}")
+        summary = summarize_patch_note_with_llm(sample_patch_data, progress_callback=_main_logger)
+        _main_logger(f"\nLLM Summary:\n{summary}")
+        answer = answer_question_on_patch_note_with_llm(sample_patch_data, "What happened to Fireball?", progress_callback=_main_logger)
+        _main_logger(f"\nQ: What happened to Fireball?\nA: {answer}")

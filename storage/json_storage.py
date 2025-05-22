@@ -19,11 +19,21 @@ def slugify(text):
     text = text.strip('-') # Remove leading/trailing hyphens
     return text
 
-def save_processed_patch_note(processed_data):
-    """Saves processed patch note data to a JSON file."""
+def save_processed_patch_note(processed_data, progress_callback=None):
+    """
+    Saves processed patch note data to a JSON file.
+    Optionally uses a progress_callback for logging instead of print.
+    """
+    
+    def _log(message):
+        if progress_callback:
+            progress_callback(message)
+        else:
+            print(message) # Fallback to print if no callback
+
     if not processed_data or not processed_data.get("title") or not processed_data.get("date"):
-        print("Error: Processed data is missing title or date for filename generation.")
-        return None
+        _log("Error: Processed data is missing title or date for filename generation.")
+        return None # Indicates an issue before even trying to save (e.g. bad data)
 
     date_str = processed_data["date"]
     date_prefix = ""
@@ -51,11 +61,10 @@ def save_processed_patch_note(processed_data):
                 if match:
                     date_prefix = match.group(1)
                 else:
-                    # Last resort: slugify the original date string if no YYYY-MM-DD found
-                    print(f"Warning: Could not determine YYYY-MM-DD from date '{date_str}'. Using slugified original.")
+                    _log(f"Warning: Could not determine YYYY-MM-DD from date '{date_str}'. Using slugified original.")
                     date_prefix = slugify(date_str) if date_str else "unknown-date"
-    else: # If date is not a string (e.g. None or other type)
-        print(f"Warning: Date field is not a string ('{date_str}'). Using 'unknown-date'.")
+    else: 
+        _log(f"Warning: Date field is not a string ('{date_str}'). Using 'unknown-date'.")
         date_prefix = "unknown-date"
 
     title_slug = slugify(processed_data["title"])
@@ -67,57 +76,73 @@ def save_processed_patch_note(processed_data):
 
     # Delta Detection
     if os.path.exists(filepath):
-        print(f"Patch note '{filename}' already exists. Skipping save.")
-        return None 
+        _log(f"Patch note '{filename}' already exists. Skipping save.")
+        return None # None indicates already exists, not an error in saving itself
     
     try:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(processed_data, f, indent=4)
-        print(f"Saved new patch note: {filename}")
-        return filepath # Return the full path of the saved file
+        _log(f"Saved new patch note: {filename}")
+        return filepath 
     except IOError as e:
-        print(f"Error saving patch note to {filepath}: {e}")
-        return False # Indicate save failure
+        _log(f"Error saving patch note to {filepath}: {e}")
+        return False # False indicates a save failure
 
-def load_latest_patch_note():
-    """Loads the most recent patch note from DATA_DIR based on YYYY-MM-DD prefix."""
+def load_latest_patch_note(progress_callback=None):
+    """
+    Loads the most recent patch note from DATA_DIR.
+    Optionally uses a progress_callback for logging.
+    """
+    def _log(message):
+        if progress_callback:
+            progress_callback(message)
+        else:
+            print(message)
+
     try:
-        # Filter for JSON files that start with a date-like pattern
         files = [f for f in os.listdir(DATA_DIR) if f.endswith('.json') and re.match(r"\d{4}-\d{2}-\d{2}_", f)]
         if not files:
-            print("No patch notes found in the data directory.")
+            _log("No patch notes found in the data directory.")
             return None
         
-        # Sort files by filename (which starts with YYYY-MM-DD) in descending order to get the latest
         files.sort(reverse=True)
         latest_filename = files[0]
         
-        print(f"Identified latest patch note file: {latest_filename}")
-        return load_patch_note_by_filename(latest_filename)
+        _log(f"Identified latest patch note file: {latest_filename}")
+        return load_patch_note_by_filename(latest_filename, progress_callback=progress_callback)
     except Exception as e:
-        print(f"Error scanning for latest patch note: {e}")
+        _log(f"Error scanning for latest patch note: {e}")
         return None
 
-def load_patch_note_by_filename(filename):
-    """Loads a specific patch note JSON file from DATA_DIR."""
-    if not filename.endswith(".json"): # Basic check
+def load_patch_note_by_filename(filename, progress_callback=None):
+    """
+    Loads a specific patch note JSON file from DATA_DIR.
+    Optionally uses a progress_callback for logging.
+    """
+    def _log(message):
+        if progress_callback:
+            progress_callback(message)
+        else:
+            print(message)
+
+    if not filename.endswith(".json"):
         filename += ".json"
 
     filepath = os.path.join(DATA_DIR, filename)
     if not os.path.exists(filepath):
-        print(f"Error: File '{filename}' not found in {DATA_DIR}.")
+        _log(f"Error: File '{filename}' not found in {DATA_DIR}.")
         return None
     
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        print(f"Successfully loaded patch note: {filename}")
+        _log(f"Successfully loaded patch note: {filename}")
         return data
     except json.JSONDecodeError as e:
-        print(f"Error decoding JSON from {filepath}: {e}")
+        _log(f"Error decoding JSON from {filepath}: {e}")
         return None
-    except Exception as e: # Catch other potential errors like permission issues
-        print(f"Error loading patch note from {filepath}: {e}")
+    except Exception as e:
+        _log(f"Error loading patch note from {filepath}: {e}")
         return None
 
 if __name__ == "__main__":
