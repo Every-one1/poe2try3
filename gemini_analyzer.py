@@ -5,12 +5,22 @@ import poe2_wiki_scraper
 import poe2_community_scraper
 import json
 
-API_KEY = "" # Your key
+API_KEY = os.getenv("GEMINI_API_KEY")
 
-if not API_KEY or API_KEY == "YOUR_API_KEY_PLACEHOLDER_TEXT":
-    raise ValueError("API_KEY is not set correctly in the script.")
+# Check if the API key is set via environment variable
+if not API_KEY:
+    print("CRITICAL ERROR: The GEMINI_API_KEY environment variable is not set.")
+    print("Please set this environment variable with your Gemini API key.")
+    # It's important to exit here if the key isn't set, as genai.configure would fail.
+    exit() 
 
+# Configure the generative AI model with the API key
 genai.configure(api_key=API_KEY)
+
+# Secondary check for placeholder text, in case the env var was set to the placeholder
+if API_KEY == "YOUR_API_KEY_PLACEHOLDER_TEXT": # This is a common placeholder
+    raise ValueError("GEMINI_API_KEY is set to the placeholder text. Please use a valid API key.")
+
 
 SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
@@ -333,8 +343,11 @@ if __name__ == "__main__":
     print("Gemini Analyzer - Direct Test Mode (using placeholder data)")
     placeholder_build_data = "Minimal placeholder data for direct gemini_analyzer.py test."
     
-    if not API_KEY or API_KEY == "YOUR_API_KEY_PLACEHOLDER_TEXT":
-        print("ERROR: Please set your GEMINI_API_KEY in the script for this test.")
+    # The main API_KEY check is now at the top of the script.
+    # This section is for the direct test mode, so we assume if we reach here, the key is loaded.
+    # A specific check for the placeholder in the context of this test might still be useful.
+    if API_KEY == "YOUR_API_KEY_PLACEHOLDER_TEXT":
+        print("ERROR: GEMINI_API_KEY is set to the placeholder. Please set a real API key as an environment variable for this test.")
     else:
         analysis = analyze_build_with_gemini(placeholder_build_data, "User goal: test basic response.")
         print("\n--- GEMINI ANALYSIS (Placeholder Test) ---")
